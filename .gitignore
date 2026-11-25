@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+.coverage
+htmlcov/
+coverage.xml
+bandit-report.*
+deploy/
+.pytest_cache/

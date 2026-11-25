@@ -1,0 +1,97 @@
+pipeline {
+    agent any
+
+    environment {
+        VIRTUAL_ENV = 'venv'
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                script {
+                    if (!fileExists("${env.WORKSPACE}/${VIRTUAL_ENV}")) {
+                        sh "python3 -m venv ${VIRTUAL_ENV}"
+                    }
+                    // '.' is the POSIX equivalent of 'source' (Jenkins runs sh, not bash)
+                    sh ". ${VIRTUAL_ENV}/bin/activate && pip install -r requirements.txt"
+                }
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                script {
+                    sh ". ${VIRTUAL_ENV}/bin/activate && flake8 app.py"
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                script {
+                    sh ". ${VIRTUAL_ENV}/bin/activate && pytest -v"
+                }
+            }
+        }
+
+        stage('Coverage') {
+            steps {
+                script {
+                    sh """
+                        . ${VIRTUAL_ENV}/bin/activate
+                        coverage run --source=. --omit='${VIRTUAL_ENV}/*,tests/*,conftest.py' -m pytest
+                        coverage report -m --fail-under=80
+                        coverage html
+                        coverage xml
+                    """
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'htmlcov/**, coverage.xml', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                script {
+                    sh """
+                        . ${VIRTUAL_ENV}/bin/activate
+                        bandit -r . -x ./${VIRTUAL_ENV},./tests -f txt -o bandit-report.txt || true
+                        bandit -r . -x ./${VIRTUAL_ENV},./tests -f json -o bandit-report.json || true
+                        cat bandit-report.txt
+                        # Fail the build on medium/high severity issues
+                        bandit -r . -x ./${VIRTUAL_ENV},./tests -ll
+                    """
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'bandit-report.*', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                script {
+                    echo "Deploying application..."
+                    sh "sh scripts/deploy.sh"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline finished successfully: all stages passed."
+        }
+        failure {
+            echo "Pipeline failed."
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
